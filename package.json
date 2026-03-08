@@ -6,12 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "recon-pdf": "node scripts/recon-pdf.mjs"
   },
   "dependencies": {
+    "@langchain/core": "^1.1.31",
+    "@langchain/textsplitters": "^1.0.1",
+    "cheerio": "^1.2.0",
     "next": "16.1.6",
+    "openai": "^6.27.0",
+    "pdfjs-dist": "^5.5.207",
+    "playwright": "^1.58.2",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "serpapi": "^2.2.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
