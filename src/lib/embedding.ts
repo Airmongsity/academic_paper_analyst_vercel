@@ -24,8 +24,10 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
       const err = await res.text();
       throw new Error(`SiliconFlow 嵌入失败: ${res.status} ${err}`);
     }
-    const data = (await res.json()) as { data: { embedding: number[] }[] };
-    const vectors = data.data.sort((a, b) => a.index - b.index).map((x) => x.embedding);
+    const data = (await res.json()) as { data: { embedding: number[]; index?: number }[] };
+    const vectors = data.data
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+      .map((x) => x.embedding);
     results.push(...vectors);
   }
   return results;

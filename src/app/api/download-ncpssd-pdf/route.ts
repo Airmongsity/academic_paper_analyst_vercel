@@ -22,13 +22,14 @@ export async function POST(req: NextRequest) {
     }
 
     const filename = "paper.pdf";
-    const body = new Uint8Array(buf);
-    return new NextResponse(body, {
+    // Buffer 不能直接作为 NextResponse body，转换为 Uint8Array 符合 Web API BodyInit
+    const pdfBytes = Uint8Array.from(buf as Iterable<number>);
+    return new NextResponse(pdfBytes, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(body.length),
+        "Content-Length": String(pdfBytes.length),
       },
     });
   } catch {
