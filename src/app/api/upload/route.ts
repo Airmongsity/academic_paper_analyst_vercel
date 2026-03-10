@@ -6,10 +6,12 @@ import { extractTextFromPdf, cleanPdfText } from "@/lib/pdf-utils";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const agent = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  baseURL: "https://api.deepseek.com",
-});
+/** 延迟初始化，构建时 env 不可用 */
+function getAgent() {
+  const key = process.env.DEEPSEEK_API_KEY ?? "";
+  if (!key) throw new Error("未配置 DEEPSEEK_API_KEY");
+  return new OpenAI({ apiKey: key, baseURL: "https://api.deepseek.com" });
+}
 
 const KEYWORDS_PROMPT = `
 You're a helpful assistant that get keywords from text;
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const response = await agent.chat.completions.create({
+    const response = await getAgent().chat.completions.create({
       model: "deepseek-chat",
       messages: [
         { role: "system", content: KEYWORDS_PROMPT },

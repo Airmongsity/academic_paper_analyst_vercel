@@ -7,10 +7,12 @@ import { embedTexts } from "@/lib/embedding";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const agent = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  baseURL: "https://api.deepseek.com",
-});
+/** 延迟初始化，构建时 env 不可用，避免 Missing credentials 报错 */
+function getAgent() {
+  const key = process.env.DEEPSEEK_API_KEY ?? "";
+  if (!key) throw new Error("未配置 DEEPSEEK_API_KEY");
+  return new OpenAI({ apiKey: key, baseURL: "https://api.deepseek.com" });
+}
 
 const OPTIMIZE_PROMPT = `你是一位专业的学术论文编辑。请根据参考语料优化以下段落，使表述更清晰、学术化，同时保持原意。若参考语料与当前段落主题相关，可适当借鉴其表达；若无直接关联，仅做润色即可。只输出优化后的段落原文，不要添加解释或标注。如果小标题被错误切分到末尾，请直接在对应位置输出即可`;
 
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
             ? `【参考语料】\n${refText}\n\n【待优化段落】\n${chunk}`
             : `【待优化段落】\n${chunk}`;
 
-          const res = await agent.chat.completions.create({
+          const res = await getAgent().chat.completions.create({
             model: "deepseek-chat",
             messages: [
               { role: "system", content: OPTIMIZE_PROMPT },
