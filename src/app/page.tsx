@@ -88,6 +88,20 @@ export default function Home() {
   const [optimizedDocxBase64, setOptimizedDocxBase64] = useState<string | null>(null);
 
   const hasCorpus = selectedLinks.size > 0 || uploadedPdfs.length > 0;
+  const textToOptimize = confirmedText || parsedText;
+
+  useEffect(() => {
+    if (!analyzeResult) return;
+    setAnalyzeResult(null);
+    setSelectedChunks(new Set());
+    setCompletedSteps((p) => {
+      const n = new Set(p);
+      n.delete("parse");
+      return n;
+    });
+    // 语料变化时清空解析结果，避免使用过期数据
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLinks, uploadedPdfs]);
 
   const markCompleted = useCallback((step: Step) => {
     setCompletedSteps((prev) => new Set(prev).add(step));
@@ -297,7 +311,8 @@ export default function Home() {
   };
 
   const handleSplit = async () => {
-    if (!confirmedText.trim()) return;
+    const text = textToOptimize.trim();
+    if (!text) return;
     setSplitting(true);
     setError(null);
     setSplitChunks([]);
@@ -307,7 +322,7 @@ export default function Home() {
       const res = await fetch("/api/split-paper", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: confirmedText }),
+        body: JSON.stringify({ text }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "切分失败");
@@ -614,7 +629,7 @@ export default function Home() {
                     type="button"
                     onClick={handleVectorize}
                     disabled={vectorizing || selectedChunks.size === 0}
-                    className="text-xs px-3 py-1 bg-emerald-500 text-white rounded hover:bg-emerald-600 disabled:opacity-50"
+                    className="px-6 py-2.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-50"
                   >
                     {vectorizing ? "向量化中…" : "向量化并存储"}
                   </button>
@@ -663,9 +678,9 @@ export default function Home() {
             <p className="text-sm text-gray-500">
               先切分段落，选择需优化的块并可编辑，再基于语料库检索优化。左右对照便于比较与复制。
             </p>
-            {confirmedText ? (
+            {textToOptimize ? (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">已加载待优化论文（{confirmedText.length} 字）</p>
+                <p className="text-sm text-gray-600">已加载待优化论文（{textToOptimize.length} 字）</p>
 
                 {splitChunks.length === 0 ? (
                   <button
@@ -823,7 +838,7 @@ export default function Home() {
                 )}
               </div>
             ) : (
-              <p className="text-sm text-amber-600">请先完成步骤 1 上传论文并确认。</p>
+              <p className="text-sm text-amber-600">请先完成步骤 1 上传论文。</p>
             )}
           </div>
         )}
