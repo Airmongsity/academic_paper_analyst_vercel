@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchPdfBlob } from "@/lib/ncpssd-pdf";
 import { extractTextFromPdf, cleanPdfText, splitIntoChunks, normalizeWhitespace } from "@/lib/pdf-utils";
+import { getPaperCacheKey, getCachedChunks, setCachedChunks, type PaperInput } from "@/lib/paper-cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
-
-type PaperInput = {
-  link: string;
-  source?: "scholar" | "ncpssd";
-  pdfUrl?: string;
-  title?: string;
-};
 
 const PDF_FETCH_RETRIES = 3;
 
@@ -46,6 +40,13 @@ export async function POST(req: NextRequest) {
     let failed = 0;
 
     for (const paper of papers) {
+      const cacheKey = getPaperCacheKey(paper);
+      const cached = await getCachedChunks(cacheKey);
+      if (cached) {
+        allChunks.push(cached);
+        continue;
+      }
+
       let pdfBuffer: Buffer | null = null;
       try {
         pdfBuffer = await fetchPdfWithRetry(paper);
@@ -64,10 +65,9 @@ export async function POST(req: NextRequest) {
       const rawChunks = await splitIntoChunks(cleaned, { maxChunkSize, minChunkSize });
       const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
 
-      allChunks.push({
-        title: paper.title ?? "未知",
-        chunks,
-      });
+      const title = paper.title ?? "未知";
+      allChunks.push({ title, chunks });
+      await setCachedChunks(cacheKey, title, chunks);
     }
 
     return NextResponse.json({

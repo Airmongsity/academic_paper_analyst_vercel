@@ -74,6 +74,7 @@ export default function Home() {
     totalChunks: number;
     papers: { title: string; chunks: string[] }[];
     failed: number;
+    skipped?: number;
     successCount?: number;
     totalCount?: number;
   } | null>(null);
@@ -157,7 +158,13 @@ export default function Home() {
       });
       if (!res.ok) throw new Error((await res.text()) || "搜索失败");
       const data = await res.json();
-      setPapers((data.papers || []) as Paper[]);
+      const list = (data.papers || []) as Paper[];
+      setPapers(list);
+      // 默认勾选前 3 篇可下载 PDF 的论文：NCPSSD 或有 pdfUrl 且无需登录的 Scholar
+      const available = list.filter(
+        (p) => p.source === "ncpssd" && p.link || (p.pdfUrl && !p.requiresLogin)
+      );
+      setSelectedLinks(new Set(available.slice(0, 3).map((p) => p.link)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "搜索失败");
     } finally {
@@ -244,6 +251,7 @@ export default function Home() {
                 totalChunks: data.totalChunks,
                 papers: list,
                 failed: data.failed ?? 0,
+                skipped: data.skipped,
                 successCount: data.successCount,
                 totalCount: data.totalCount,
               });
@@ -315,7 +323,12 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "向量化失败");
-      setVectorizeMsg(`成功存入 ${data.inserted} 条向量`);
+      const skipped = data.skipped ?? 0;
+      setVectorizeMsg(
+        skipped > 0
+          ? `成功存入 ${data.inserted} 条，跳过 ${skipped} 条已存在`
+          : `成功存入 ${data.inserted} 条向量`
+      );
       markCompleted("parse");
       goNext("parse");
     } catch (e) {
@@ -715,9 +728,11 @@ export default function Home() {
               <div className="space-y-3">
                 <p className="text-sm">
                   成功 {analyzeResult.papers.length} 篇，共 {analyzeResult.totalChunks} 个 chunks
-                  {analyzeResult.failed > 0 && (
+                  {(analyzeResult.failed > 0 || (analyzeResult.skipped ?? 0) > 0) && (
                     <span className="text-amber-600 ml-1">
-                      （解析了 {analyzeResult.successCount ?? analyzeResult.papers.length}/{analyzeResult.totalCount ?? analyzeResult.papers.length + analyzeResult.failed} 份 PDF）
+                      （解析了 {analyzeResult.successCount ?? analyzeResult.papers.length}/{analyzeResult.totalCount ?? analyzeResult.papers.length + analyzeResult.failed} 份 PDF
+                      {(analyzeResult.skipped ?? 0) > 0 ? `，${analyzeResult.skipped} 篇已解析跳过` : ""}
+                      ）
                     </span>
                   )}
                 </p>

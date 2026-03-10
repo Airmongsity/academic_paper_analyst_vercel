@@ -24,11 +24,26 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const embeddings = await embedTexts(texts);
+    // 去重：查询已存在的 content，避免重复插入污染数据集
+    const { data: existing } = await supabase
+      .from("documents")
+      .select("content")
+      .in("content", texts);
+    const existingSet = new Set((existing ?? []).map((r) => r.content));
+    const toInsertMap = new Map<string, { content: string; metadata: Record<string, unknown> }>();
+    texts.forEach((content, i) => {
+      if (!existingSet.has(content)) toInsertMap.set(content, { content, metadata: chunks[i]?.metadata ?? {} });
+    });
+    const toInsert = [...toInsertMap.values()];
 
-    const rows = texts.map((content, i) => ({
-      content,
-      metadata: chunks[i]?.metadata ?? {},
+    if (toInsert.length === 0) {
+      return Response.json({ success: true, inserted: 0, skipped: texts.length });
+    }
+
+    const embeddings = await embedTexts(toInsert.map((r) => r.content));
+    const rows = toInsert.map((r, i) => ({
+      content: r.content,
+      metadata: r.metadata,
       embedding: embeddings[i],
     }));
 
@@ -41,7 +56,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return Response.json({ success: true, inserted: rows.length });
+    return Response.json({ success: true, inserted: rows.length, skipped: texts.length - rows.length });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "向量化失败";
     return Response.json({ error: msg }, { status: 500 });

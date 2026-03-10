@@ -1,16 +1,10 @@
 import { NextRequest } from "next/server";
 import { fetchPdfBlob } from "@/lib/ncpssd-pdf";
 import { extractTextFromPdf, cleanPdfText, splitIntoChunks, normalizeWhitespace } from "@/lib/pdf-utils";
+import { getPaperCacheKey, getCachedChunks, setCachedChunks, type PaperInput } from "@/lib/paper-cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
-
-type PaperInput = {
-  link: string;
-  source?: "scholar" | "ncpssd";
-  pdfUrl?: string;
-  title?: string;
-};
 
 function send(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
   controller.enqueue(new TextEncoder().encode(JSON.stringify(obj) + "\n"));
@@ -52,11 +46,21 @@ export async function POST(req: NextRequest) {
       try {
         const allChunks: { title: string; chunks: string[] }[] = [];
         let failed = 0;
+        let skipped = 0;
         const total = papers.length + uploadedPdfs.length;
         let idx = 0;
 
         for (const paper of papers) {
           idx++;
+          const cacheKey = getPaperCacheKey(paper);
+          const cached = await getCachedChunks(cacheKey);
+          if (cached) {
+            send(controller, { type: "progress", step: "cached", index: idx, total, msg: `第 ${idx} 篇已解析过，跳过下载` });
+            allChunks.push(cached);
+            skipped++;
+            continue;
+          }
+
           send(controller, { type: "progress", step: "download", index: idx, total, msg: `正在下载第 ${idx} 篇 PDF：${(paper.title ?? "").slice(0, 20)}…` });
 
           let pdfBuffer: Buffer | null = null;
@@ -81,7 +85,9 @@ export async function POST(req: NextRequest) {
             const rawChunks = await splitIntoChunks(cleaned, splitOpts);
             const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
 
-            allChunks.push({ title: paper.title ?? "未知", chunks });
+            const title = paper.title ?? "未知";
+            allChunks.push({ title, chunks });
+            await setCachedChunks(cacheKey, title, chunks);
           } catch {
             failed++;
           }
@@ -123,6 +129,7 @@ export async function POST(req: NextRequest) {
           papers: allChunks,
           totalChunks: allChunks.reduce((s, p) => s + p.chunks.length, 0),
           failed,
+          skipped,
           successCount,
           totalCount: total,
         });

@@ -13,6 +13,16 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 ALTER TABLE documents ALTER COLUMN embedding TYPE vector(1024);
 ```
 
+**已解析论文缓存表**（用于跳过重复下载，需在 Supabase SQL 编辑器中执行）：
+```sql
+create table if not exists parsed_papers_cache (
+  cache_key text primary key,
+  title text,
+  chunks jsonb not null default '[]',
+  updated_at timestamptz default now()
+);
+```
+
 **向量相似度检索**：在 Supabase SQL 编辑器中执行以下函数，供「优化论文」步骤使用：
 ```sql
 create or replace function match_documents (
