@@ -1,5 +1,40 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## 环境变量
+
+**PDF 解析**：使用 pdfjs-dist 本地解析，自动清洗页眉页脚和公式。语料切分使用 `@langchain/textsplitters` 的 `RecursiveCharacterTextSplitter`。
+
+**向量化**（可选）：
+- `NEXT_PUBLIC_SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`（或 `NEXT_PUBLIC_SUPABASE_ANON_KEY`）：Supabase 连接
+- `SILICONFLOW_API_KEY`：SiliconFlow 嵌入 API（1024 维）
+
+**pgvector 表结构**：若建表时使用 `vector(1536)`，需改为 1024 维：
+```sql
+ALTER TABLE documents ALTER COLUMN embedding TYPE vector(1024);
+```
+
+**向量相似度检索**：在 Supabase SQL 编辑器中执行以下函数，供「优化论文」步骤使用：
+```sql
+create or replace function match_documents (
+  query_embedding vector(1024),
+  match_threshold float default 0.4,
+  match_count int default 5
+)
+returns table (id bigint, content text, metadata jsonb, similarity float)
+language sql stable
+as $$
+  select d.id, d.content, d.metadata,
+    1 - (d.embedding <=> query_embedding) as similarity
+  from documents d
+  where d.embedding is not null
+    and 1 - (d.embedding <=> query_embedding) > match_threshold
+  order by d.embedding <=> query_embedding
+  limit match_count;
+$$;
+```
+
+其他：`DEEPSEEK_API_KEY`、`SERPAPI_API_KEY`、`NCPSSD_BASE`、`NCPSSD_PDF_HEADED` 等按需配置。
+
 ## Getting Started
 
 First, run the development server:

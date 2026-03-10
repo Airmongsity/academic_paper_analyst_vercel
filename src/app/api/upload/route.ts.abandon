@@ -1,0 +1,118 @@
+import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
+const GEMINI_PARSE_PROMPT = `你将收到一份学术论文 PDF。请将其完整解析为 Markdown 格式，要求：
+1. 保留标题层级（#、##、### 等）
+2. 保留段落结构，双栏论文请按正确阅读顺序排列
+3. 表格用 Markdown 表格或代码块形式呈现
+4. 公式用 LaTeX 表示（$...$ 或 $$...$$）
+5. 图表可简述为 [图：描述] 或保留原文描述
+6. 不要遗漏正文内容
+7. 输出纯 Markdown，不要添加额外说明`;
+
+const KEYWORDS_PROMPT = `
+You're a helpful assistant that get keywords from text;
+Use professional English and only return keywords in the response text.
+the keywords should correspond to similar papers, allowing users to find similar papers by searching for those keywords.
+response text must NOT exceed 6 words
+但是如果论文是中文, 则须返回1个精炼的中文关键词, 不超过6个字符, 且不能含有分隔符, 否则会被认为是多个关键词
+例如"农业合作化"、"民族认同"、"抗战创伤记忆"等是合法关键词, 而"突尼斯民族身份"、"战争与创伤记忆"是非法关键词
+`;
+
+const agent = new OpenAI({
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  baseURL: "https://api.deepseek.com",
+});
+
+/** 使用 Gemini API 将 PDF 解析为 Markdown */
+async function parsePdfWithGemini(pdfBase64: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey?.trim()) {
+    throw new Error("请设置环境变量 GEMINI_API_KEY（在 aistudio.google.com 获取）");
+  }
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: GEMINI_PARSE_PROMPT },
+              { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 8192,
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini API 失败 (${res.status}): ${err.slice(0, 300)}`);
+  }
+
+  const json = (await res.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      finishReason?: string;
+    }>;
+    error?: { message?: string };
+  };
+
+  if (json.error) throw new Error(json.error.message ?? "Gemini API 错误");
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!text) throw new Error("Gemini 未返回解析内容");
+  return text;
+}
+
+export async function POST(req: NextRequest) {
+  const formData = await req.formData();
+  const file = formData.get("file");
+
+  if (!file || !(file instanceof Blob)) {
+    return new NextResponse("No file provided", { status: 400 });
+  }
+
+  let text = "";
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const pdfBase64 = buffer.toString("base64");
+    text = await parsePdfWithGemini(pdfBase64);
+  } catch (error) {
+    console.error("Error parsing PDF:", error);
+    return new NextResponse(
+      error instanceof Error ? error.message : "Error parsing PDF",
+      { status: 500 }
+    );
+  }
+
+  if (!text.trim()) {
+    return new NextResponse("No text found in PDF", { status: 400 });
+  }
+
+  try {
+    const response = await agent.chat.completions.create({
+      model: "deepseek-chat",
+      messages: [
+        { role: "system", content: KEYWORDS_PROMPT },
+        { role: "user", content: text },
+      ],
+    });
+    const keywords = response.choices[0].message.content?.trim() || "";
+    return NextResponse.json({ ok: true, keywords });
+  } catch (error) {
+    console.error("Error getting keywords:", error);
+    return new NextResponse("Error getting keywords", { status: 500 });
+  }
+}
