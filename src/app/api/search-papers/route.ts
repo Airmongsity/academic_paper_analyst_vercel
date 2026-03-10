@@ -225,7 +225,7 @@ async function searchScholar(keywords: string, apiKey: string): Promise<PaperIte
   });
 
   const list = result?.organic_results || [];
-  return list.map((item) => {
+  const items: PaperItem[] = list.map((item) => {
     const pdfResource = (item.resources || []).find((r) => r.file_format === "PDF");
     return {
       title: (item.title as string) || "",
@@ -235,6 +235,13 @@ async function searchScholar(keywords: string, apiKey: string): Promise<PaperIte
       pdfUrl: (pdfResource?.link as string) ?? "",
       source: "scholar" as const,
     };
+  });
+  // 有 PDF 的排前面，无法下载的排后面
+  return items.sort((a, b) => {
+    const aCan = !!a.pdfUrl?.trim();
+    const bCan = !!b.pdfUrl?.trim();
+    if (aCan === bCan) return 0;
+    return aCan ? -1 : 1;
   });
 }
 

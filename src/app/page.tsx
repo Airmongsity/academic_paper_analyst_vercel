@@ -534,7 +534,14 @@ export default function Home() {
               <div className="space-y-2">
                 <p className="text-sm text-gray-600">已选 {selectedLinks.size} 篇，点击卡片加入语料库</p>
                 <ul className="space-y-2 max-h-[50vh] overflow-y-auto">
-                  {papers.map((p, i) => (
+                  {[...papers]
+                    .sort((a, b) => {
+                      const aCan = a.source === "ncpssd" || !!a.pdfUrl?.trim();
+                      const bCan = b.source === "ncpssd" || !!b.pdfUrl?.trim();
+                      if (aCan === bCan) return 0;
+                      return aCan ? -1 : 1;
+                    })
+                    .map((p, i) => (
                     <li
                       key={p.link || i}
                       onClick={() => toggleSelect(p.link)}
@@ -560,6 +567,15 @@ export default function Home() {
                               disabled={downloadingLink === p.link} className="mt-1 text-xs text-blue-500 hover:underline">
                               {downloadingLink === p.link ? "下载中…" : "PDF 下载"}
                             </button>
+                          )}
+                          {p.source === "scholar" && p.pdfUrl && (
+                            <a href={p.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                              className="mt-1 text-xs text-blue-500 hover:underline inline-block">
+                              PDF 下载
+                            </a>
+                          )}
+                          {p.source === "scholar" && !p.pdfUrl?.trim() && (
+                            <span className="mt-1 text-xs text-gray-400">无法自动下载</span>
                           )}
                         </div>
                       </div>
