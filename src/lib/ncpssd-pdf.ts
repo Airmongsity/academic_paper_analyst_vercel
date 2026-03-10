@@ -1,17 +1,24 @@
 import * as cheerio from "cheerio";
-import { chromium } from "playwright";
+import { chromium as playwright } from "playwright-core";
+import chromium from "@sparticuz/chromium";
 
 const NCPSSD_BASE = process.env.NCPSSD_BASE ?? "https://www.ncpssd.org";
 
 /** NCPSSD 实际 PDF 域名：ft.ncpssd.cn 或 ftprp.ncpssd.cn（侦察确认） */
 const PDF_DOMAIN = /ft\.ncpssd\.cn|ftprp\.ncpssd\.cn/;
 
+/** 启动 Chromium（使用 @sparticuz/chromium，适配 Vercel/Lambda 等 serverless 环境） */
+async function launchBrowser(headless = true) {
+  return playwright.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless,
+  });
+}
+
 /** 使用 Playwright 模拟点击「全文下载」，从响应中捕获 PDF URL（点击后发起 GET，不触发 download 事件） */
 async function fetchPdfUrlWithPlaywright(articleUrl: string): Promise<string> {
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  const browser = await launchBrowser(true);
   try {
     const context = await browser.newContext({
       userAgent:
@@ -118,12 +125,8 @@ export async function fetchPdfUrl(articleUrl: string): Promise<string> {
 export async function fetchPdfBlob(articleUrl: string, maxRetries = 2): Promise<Buffer | null> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const headed = process.env.NCPSSD_PDF_HEADED === "1" || process.env.NCPSSD_PDF_HEADED === "true";
-    const browser = await chromium.launch({
-      headless: !headed,
-      slowMo: headed ? 80 : 0,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    // @sparticuz/chromium 仅支持 headless，生产/ serverless 环境始终 headless
+    const browser = await launchBrowser(true);
     try {
       const context = await browser.newContext({
         userAgent:

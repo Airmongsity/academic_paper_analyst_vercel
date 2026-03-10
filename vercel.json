@@ -2,6 +2,10 @@
   "functions": {
     "src/app/api/upload/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/download-ncpssd-pdf/route.ts": {
+      "maxDuration": 60,
+      "memory": 2048
     }
   }
 }
