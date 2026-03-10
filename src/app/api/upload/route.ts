@@ -44,10 +44,8 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error("Error parsing file:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "解析文件失败" },
-      { status: 500 }
-    );
+    const msg = error instanceof Error ? error.message : "解析文件失败";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   if (!text.trim()) {
@@ -66,6 +64,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, text, keywords });
   } catch (error) {
     console.error("Error getting keywords:", error);
-    return NextResponse.json({ error: "Error getting keywords" }, { status: 500 });
+    const msg = error instanceof Error ? error.message : "Error getting keywords";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

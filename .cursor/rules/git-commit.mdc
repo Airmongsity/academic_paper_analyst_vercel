@@ -1,0 +1,17 @@
+---
+description: 小改动后自动 git add 并 commit
+alwaysApply: true
+---
+
+# Git 提交惯例
+
+完成**小改动**（如修复、小功能、配置调整）后，主动执行：
+
+```bash
+git add .
+git commit -m "简短描述本次改动"
+```
+
+- **commit message**：用中文简要说明（如「修复 Vercel 构建」「改用 pdfjs-serverless」）
+- **何时执行**：完成编辑后、无未解决问题时
+- **不要**：在用户明确表示暂不提交、或在讨论/探索阶段时强制提交

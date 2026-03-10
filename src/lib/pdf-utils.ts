@@ -1,10 +1,9 @@
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
-import "pdfjs-dist/legacy/build/pdf.worker.mjs";
+import { getDocument } from "pdfjs-serverless";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 
-/** 从 PDF Buffer 提取纯文本（pdfjs-dist） */
+/** 从 PDF Buffer 提取纯文本（使用 pdfjs-serverless，兼容 Vercel 等 serverless） */
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const doc = await pdfjsLib.getDocument(new Uint8Array(buffer)).promise;
+  const doc = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise;
   let full = "";
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
