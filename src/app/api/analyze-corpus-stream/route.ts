@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { fetchPdfBlob } from "@/lib/ncpssd-pdf";
-import { extractTextFromPdf, cleanPdfText, splitIntoChunks } from "@/lib/pdf-utils";
+import { extractTextFromPdf, cleanPdfText, splitIntoChunks, normalizeWhitespace } from "@/lib/pdf-utils";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
 
           send(controller, { type: "progress", step: "split", index: idx, msg: "正在切分语料" });
           const cleaned = cleanPdfText(rawText);
-          const chunks = await splitIntoChunks(cleaned);
+          const rawChunks = await splitIntoChunks(cleaned);
+          const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
 
           allChunks.push({ title: paper.title ?? "未知", chunks });
         }
@@ -80,7 +81,8 @@ export async function POST(req: NextRequest) {
           send(controller, { type: "progress", step: "split", index: idx, msg: "正在切分语料" });
           const rawText = await extractTextFromPdf(pdfBuffer);
           const cleaned = cleanPdfText(rawText);
-          const chunks = await splitIntoChunks(cleaned);
+          const rawChunks = await splitIntoChunks(cleaned);
+          const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
 
           allChunks.push({ title: up.name.replace(/\.pdf$/i, ""), chunks });
         }

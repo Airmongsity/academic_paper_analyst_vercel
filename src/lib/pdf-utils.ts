@@ -134,6 +134,11 @@ export function cleanPdfText(raw: string, options: CleanPdfOptions = {}): string
   return filtered.join(" ").replace(/\s+/g, " ").trim();
 }
 
+/** 清洗空格：合并连续空白、去除首尾空格（语料库解析时使用） */
+export function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /** 使用 RecursiveCharacterTextSplitter 切分（语料库用） */
 export async function splitIntoChunks(text: string): Promise<string[]> {
   const splitter = new RecursiveCharacterTextSplitter({

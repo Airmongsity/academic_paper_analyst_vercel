@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchPdfBlob } from "@/lib/ncpssd-pdf";
-import { extractTextFromPdf, cleanPdfText, splitIntoChunks } from "@/lib/pdf-utils";
+import { extractTextFromPdf, cleanPdfText, splitIntoChunks, normalizeWhitespace } from "@/lib/pdf-utils";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -43,7 +43,8 @@ export async function POST(req: NextRequest) {
 
       const rawText = await extractTextFromPdf(pdfBuffer);
       const cleaned = cleanPdfText(rawText);
-      const chunks = await splitIntoChunks(cleaned);
+      const rawChunks = await splitIntoChunks(cleaned);
+      const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
 
       allChunks.push({
         title: paper.title ?? "未知",

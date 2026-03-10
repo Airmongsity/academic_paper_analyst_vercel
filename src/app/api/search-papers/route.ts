@@ -12,6 +12,8 @@ export type PaperItem = {
   publicationInfo: string;
   pdfUrl: string;
   source: "scholar" | "ncpssd";
+  /** 部分站点（如 academia.edu）需登录才能下载 */
+  requiresLogin?: boolean;
 };
 
 const NCPSSD_BASE = process.env.NCPSSD_BASE ?? "https://www.ncpssd.org";
@@ -224,24 +226,27 @@ async function searchScholar(keywords: string, apiKey: string): Promise<PaperIte
     );
   });
 
+  const REQUIRE_LOGIN_DOMAINS = /academia\.edu|researchgate\.net/i;
   const list = result?.organic_results || [];
   const items: PaperItem[] = list.map((item) => {
     const pdfResource = (item.resources || []).find((r) => r.file_format === "PDF");
+    const pdfUrl = (pdfResource?.link as string) ?? "";
+    const requiresLogin = !!pdfUrl && REQUIRE_LOGIN_DOMAINS.test(pdfUrl);
     return {
       title: (item.title as string) || "",
       link: (item.link as string) || "",
       snippet: (item.snippet as string) ?? "",
       publicationInfo: (item.publication_info?.summary as string) ?? "",
-      pdfUrl: (pdfResource?.link as string) ?? "",
+      pdfUrl,
       source: "scholar" as const,
+      requiresLogin,
     };
   });
-  // 有 PDF 的排前面，无法下载的排后面
+  // 可下载的排前（有 pdfUrl 且无需登录），需登录的次之，无 PDF 的排后
   return items.sort((a, b) => {
-    const aCan = !!a.pdfUrl?.trim();
-    const bCan = !!b.pdfUrl?.trim();
-    if (aCan === bCan) return 0;
-    return aCan ? -1 : 1;
+    const aScore = a.pdfUrl ? (a.requiresLogin ? 1 : 2) : 0;
+    const bScore = b.pdfUrl ? (b.requiresLogin ? 1 : 2) : 0;
+    return bScore - aScore;
   });
 }
 

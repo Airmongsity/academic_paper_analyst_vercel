@@ -39,6 +39,7 @@ type Paper = {
   publicationInfo: string;
   pdfUrl: string;
   source?: "scholar" | "ncpssd";
+  requiresLogin?: boolean;
 };
 
 type Step = "upload" | "search" | "parse" | "optimize";
@@ -454,12 +455,35 @@ export default function Home() {
             <p className="text-sm text-gray-500">上传待优化的 PDF 或 Word (.docx)，解析后请确认内容再继续。</p>
             {!parsedText ? (
               <form onSubmit={handleUploadSubmit} className="flex flex-col gap-3">
-                <input
-                  type="file"
-                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="p-2 border rounded-md text-sm"
-                />
+                <div
+                  className="p-6 border-2 border-dashed border-gray-300 rounded-lg text-center transition-colors hover:border-indigo-400 cursor-pointer"
+                  onClick={() => document.getElementById("file-upload-input")?.click()}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === "Enter" && document.getElementById("file-upload-input")?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.add("ring-2", "ring-indigo-300", "border-indigo-400"); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove("ring-2", "ring-indigo-300", "border-indigo-400"); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.currentTarget.classList.remove("ring-2", "ring-indigo-300", "border-indigo-400");
+                    const items = e.dataTransfer?.files;
+                    if (!items?.length) return;
+                    const f = Array.from(items).find((x) => /\.(pdf|docx)$/i.test(x.name));
+                    if (f) setFile(f);
+                  }}
+                >
+                  <input
+                    id="file-upload-input"
+                    type="file"
+                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                  <p className="text-sm text-gray-600">
+                    {file ? file.name : "点击或拖拽 PDF / Word (.docx) 到此处"}
+                  </p>
+                </div>
                 <button
                   type="submit"
                   disabled={loading || !file}
@@ -515,6 +539,7 @@ export default function Home() {
                 type="text"
                 value={keywordInput}
                 onChange={(e) => { setKeywordInput(e.target.value); setHasSearched(false); }}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), keywordInput.trim() && searchPapers(keywordInput.trim()))}
                 placeholder="关键词"
                 className="flex-1 min-w-[160px] p-2 border rounded-md text-sm"
               />
@@ -536,10 +561,9 @@ export default function Home() {
                 <ul className="space-y-2 max-h-[50vh] overflow-y-auto">
                   {[...papers]
                     .sort((a, b) => {
-                      const aCan = a.source === "ncpssd" || !!a.pdfUrl?.trim();
-                      const bCan = b.source === "ncpssd" || !!b.pdfUrl?.trim();
-                      if (aCan === bCan) return 0;
-                      return aCan ? -1 : 1;
+                      const aScore = a.source === "ncpssd" ? 2 : a.pdfUrl ? (a.requiresLogin ? 1 : 2) : 0;
+                      const bScore = b.source === "ncpssd" ? 2 : b.pdfUrl ? (b.requiresLogin ? 1 : 2) : 0;
+                      return bScore - aScore;
                     })
                     .map((p, i) => (
                     <li
@@ -569,10 +593,25 @@ export default function Home() {
                             </button>
                           )}
                           {p.source === "scholar" && p.pdfUrl && (
-                            <a href={p.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-                              className="mt-1 text-xs text-blue-500 hover:underline inline-block">
-                              PDF 下载
-                            </a>
+                            <>
+                              <a href={p.pdfUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                                className="mt-1 text-xs text-blue-500 hover:underline inline-block mr-2">
+                                预览 PDF
+                              </a>
+                              {p.requiresLogin ? (
+                                <span className="mt-1 text-xs text-amber-600" title="academia.edu 等需登录">🔐 需要登录</span>
+                              ) : (
+                                <a
+                                  href={`/api/download-pdf?url=${encodeURIComponent(p.pdfUrl)}&filename=${encodeURIComponent(p.title.slice(0, 50))}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="mt-1 text-xs text-emerald-600 hover:underline inline-block"
+                                >
+                                  PDF 下载
+                                </a>
+                              )}
+                            </>
                           )}
                           {p.source === "scholar" && !p.pdfUrl?.trim() && (
                             <span className="mt-1 text-xs text-gray-400">无法自动下载</span>

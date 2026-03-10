@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
 , "src/app/api/upload/route.ts.abandon", "src/app/api/upload/route.ts.bak2"  ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "platform"]
 }
