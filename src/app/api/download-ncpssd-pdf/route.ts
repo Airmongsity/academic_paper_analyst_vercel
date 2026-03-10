@@ -22,12 +22,13 @@ export async function POST(req: NextRequest) {
     }
 
     const filename = "paper.pdf";
-    return new NextResponse(buf, {
+    const body = new Uint8Array(buf);
+    return new NextResponse(body, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(buf.length),
+        "Content-Length": String(body.length),
       },
     });
   } catch {
