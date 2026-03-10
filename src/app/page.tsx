@@ -74,13 +74,19 @@ export default function Home() {
     totalChunks: number;
     papers: { title: string; chunks: string[] }[];
     failed: number;
+    successCount?: number;
+    totalCount?: number;
   } | null>(null);
+  const [corpusMaxChunk, setCorpusMaxChunk] = useState(800);
+  const [corpusMinChunk, setCorpusMinChunk] = useState(280);
   const [selectedChunks, setSelectedChunks] = useState<Set<string>>(new Set());
   const [vectorizing, setVectorizing] = useState(false);
   const [vectorizeMsg, setVectorizeMsg] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
   const [splitChunks, setSplitChunks] = useState<string[]>([]);
   const [splitChunksSelected, setSplitChunksSelected] = useState<Set<number>>(new Set());
+  const [splitMaxChunk, setSplitMaxChunk] = useState(800);
+  const [splitMinChunk, setSplitMinChunk] = useState(280);
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeProgress, setOptimizeProgress] = useState<string | null>(null);
   const [optimizedResult, setOptimizedResult] = useState<
@@ -213,6 +219,8 @@ export default function Home() {
         body: JSON.stringify({
           papers: selected.map((p) => ({ link: p.link, source: p.source, pdfUrl: p.pdfUrl, title: p.title })),
           uploadedPdfs: uploadedBase64,
+          maxChunkSize: corpusMaxChunk,
+          minChunkSize: corpusMinChunk,
         }),
       });
       if (!res.ok || !res.body) throw new Error("请求失败");
@@ -230,9 +238,15 @@ export default function Home() {
           try {
             const data = JSON.parse(line);
             if (data.type === "progress") setAnalyzeProgress(data.msg);
-            else if (data.type === "result") {
+            else             if (data.type === "result") {
               const list = data.papers ?? [];
-              setAnalyzeResult({ totalChunks: data.totalChunks, papers: list, failed: data.failed ?? 0 });
+              setAnalyzeResult({
+                totalChunks: data.totalChunks,
+                papers: list,
+                failed: data.failed ?? 0,
+                successCount: data.successCount,
+                totalCount: data.totalCount,
+              });
               const initial = new Set<string>();
               list.forEach((p: { chunks: string[] }, i: number) => {
                 p.chunks.forEach((chunk: string, j: number) => {
@@ -323,7 +337,7 @@ export default function Home() {
       const res = await fetch("/api/split-paper", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, maxChunkSize: splitMaxChunk, minChunkSize: splitMinChunk }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "切分失败");
@@ -664,6 +678,30 @@ export default function Home() {
             <h2 className="text-xl font-bold">解析语料库</h2>
             <p className="text-sm text-gray-500">下载并解析所选论文 PDF，切分语料块，向量化存储完成后进入下一步。</p>
             <p className="text-sm">已选论文 {selectedLinks.size} 篇，上传 PDF {uploadedPdfs.length} 个</p>
+            <div className="flex flex-wrap gap-4 items-center">
+              <label className="flex items-center gap-2 text-sm">
+                最大切分字符：
+                <input
+                  type="number"
+                  min={200}
+                  max={2000}
+                  value={corpusMaxChunk}
+                  onChange={(e) => setCorpusMaxChunk(Number(e.target.value) || 800)}
+                  className="w-20 px-2 py-1 border rounded"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                最小连续字符：
+                <input
+                  type="number"
+                  min={50}
+                  max={500}
+                  value={corpusMinChunk}
+                  onChange={(e) => setCorpusMinChunk(Number(e.target.value) || 280)}
+                  className="w-20 px-2 py-1 border rounded"
+                />
+              </label>
+            </div>
             <button
               type="button"
               onClick={handleAnalyze}
@@ -675,7 +713,14 @@ export default function Home() {
             {analyzeProgress && <p className="text-sm text-indigo-600 animate-pulse">{analyzeProgress}</p>}
             {analyzeResult && (
               <div className="space-y-3">
-                <p className="text-sm">成功 {analyzeResult.papers.length} 篇，共 {analyzeResult.totalChunks} 个 chunks</p>
+                <p className="text-sm">
+                  成功 {analyzeResult.papers.length} 篇，共 {analyzeResult.totalChunks} 个 chunks
+                  {analyzeResult.failed > 0 && (
+                    <span className="text-amber-600 ml-1">
+                      （解析了 {analyzeResult.successCount ?? analyzeResult.papers.length}/{analyzeResult.totalCount ?? analyzeResult.papers.length + analyzeResult.failed} 份 PDF）
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-indigo-600">已选 {selectedChunks.size} 个语料块</p>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={selectAllChunks} className="text-xs px-2 py-1 border rounded hover:bg-gray-100">全选</button>
@@ -738,17 +783,65 @@ export default function Home() {
                 <p className="text-sm text-gray-600">已加载待优化论文（{textToOptimize.length} 字）</p>
 
                 {splitChunks.length === 0 ? (
-                  <button
-                    type="button"
-                    onClick={handleSplit}
-                    disabled={splitting}
-                    className="px-6 py-2.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50"
-                  >
-                    {splitting ? "切分中…" : "切分并预览"}
-                  </button>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-4 items-center">
+                      <label className="flex items-center gap-2 text-sm">
+                        最大切分字符：
+                        <input
+                          type="number"
+                          min={200}
+                          max={2000}
+                          value={splitMaxChunk}
+                          onChange={(e) => setSplitMaxChunk(Number(e.target.value) || 800)}
+                          className="w-20 px-2 py-1 border rounded"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        最小连续字符：
+                        <input
+                          type="number"
+                          min={50}
+                          max={500}
+                          value={splitMinChunk}
+                          onChange={(e) => setSplitMinChunk(Number(e.target.value) || 280)}
+                          className="w-20 px-2 py-1 border rounded"
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSplit}
+                      disabled={splitting}
+                      className="px-6 py-2.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50"
+                    >
+                      {splitting ? "切分中…" : "切分并预览"}
+                    </button>
+                  </div>
                 ) : (
                   <>
-                    <div className="flex flex-wrap gap-2 items-center">
+                    <div className="flex flex-wrap gap-4 items-center">
+                      <label className="flex items-center gap-2 text-sm">
+                        最大切分：
+                        <input
+                          type="number"
+                          min={200}
+                          max={2000}
+                          value={splitMaxChunk}
+                          onChange={(e) => setSplitMaxChunk(Number(e.target.value) || 800)}
+                          className="w-20 px-2 py-1 border rounded"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        最小连续：
+                        <input
+                          type="number"
+                          min={50}
+                          max={500}
+                          value={splitMinChunk}
+                          onChange={(e) => setSplitMinChunk(Number(e.target.value) || 280)}
+                          className="w-20 px-2 py-1 border rounded"
+                        />
+                      </label>
                       <button
                         type="button"
                         onClick={handleOptimize}

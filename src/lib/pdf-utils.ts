@@ -139,18 +139,44 @@ export function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+export type SplitOptions = {
+  /** 最大切分字符（超过则强制切块） */
+  maxChunkSize?: number;
+  /** 最小连续字符（低于则与下一块合并） */
+  minChunkSize?: number;
+};
+
+const DEFAULT_MAX_CHUNK = 800;
+const DEFAULT_MIN_CHUNK = 280;
+
 /** 使用 RecursiveCharacterTextSplitter 切分（语料库用） */
-export async function splitIntoChunks(text: string): Promise<string[]> {
+export async function splitIntoChunks(text: string, options: SplitOptions = {}): Promise<string[]> {
+  const maxChunk = options.maxChunkSize ?? DEFAULT_MAX_CHUNK;
+  const minChunk = options.minChunkSize ?? DEFAULT_MIN_CHUNK;
+  const overlap = Math.min(150, Math.floor(maxChunk * 0.2));
   const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 800,
-    chunkOverlap: 150,
+    chunkSize: maxChunk,
+    chunkOverlap: overlap,
   });
-  return splitter.splitText(text);
+  const raw = await splitter.splitText(text);
+  return mergeSmallChunks(raw, minChunk);
 }
 
-const MAX_PARAGRAPH_SIZE = 800;
-/** 最小块长度，过小则与下一块合并（缺乏上下文优化会失败） */
-const MIN_CHUNK_SIZE = 280;
+function mergeSmallChunks(chunks: string[], minSize: number): string[] {
+  if (chunks.length <= 1 || minSize <= 0) return chunks;
+  const result: string[] = [];
+  let i = 0;
+  while (i < chunks.length) {
+    let acc = chunks[i];
+    while (acc.length < minSize && i + 1 < chunks.length) {
+      i++;
+      acc += "\n\n" + chunks[i];
+    }
+    result.push(acc);
+    i++;
+  }
+  return result;
+}
 
 /** 疑似目录行：短行且以数字/点开头（如 "1. 引言" "2.2. 方法" "3 文献综述"） */
 function looksLikeTocLine(line: string): boolean {
@@ -159,10 +185,12 @@ function looksLikeTocLine(line: string): boolean {
 }
 
 /** 段落优先切分（用户论文用）：优先在章节号、双换行处分段，合并过小块，目录整块保留 */
-export async function splitIntoParagraphChunks(text: string): Promise<string[]> {
+export async function splitIntoParagraphChunks(text: string, options: SplitOptions = {}): Promise<string[]> {
+  const maxChunk = options.maxChunkSize ?? DEFAULT_MAX_CHUNK;
+  const minChunk = options.minChunkSize ?? DEFAULT_MIN_CHUNK;
   const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: MAX_PARAGRAPH_SIZE,
-    chunkOverlap: 80,
+    chunkSize: maxChunk,
+    chunkOverlap: Math.min(80, Math.floor(maxChunk * 0.1)),
     separators: [
       "\n\n", // 双换行（段落）
       "\n",   // 单换行
@@ -209,7 +237,7 @@ export async function splitIntoParagraphChunks(text: string): Promise<string[]> 
 
   const raw: string[] = [];
   for (const p of parts) {
-    if (p.length <= MAX_PARAGRAPH_SIZE) {
+    if (p.length <= maxChunk) {
       raw.push(p);
     } else {
       const sub = await splitter.splitText(p);
@@ -225,7 +253,7 @@ export async function splitIntoParagraphChunks(text: string): Promise<string[]> 
     const isToc = acc.split(/\n/).every((l) => looksLikeTocLine(l) || !l.trim());
     while (
       !isToc &&
-      acc.length < MIN_CHUNK_SIZE &&
+      acc.length < minChunk &&
       i + 1 < raw.length
     ) {
       i++;

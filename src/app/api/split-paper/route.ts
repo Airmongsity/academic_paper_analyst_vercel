@@ -12,8 +12,11 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "未提供论文文本" }, { status: 400 });
   }
 
+  const maxChunkSize = typeof body?.maxChunkSize === "number" ? body.maxChunkSize : undefined;
+  const minChunkSize = typeof body?.minChunkSize === "number" ? body.minChunkSize : undefined;
+
   try {
-    const chunks = await splitIntoParagraphChunks(text);
+    const chunks = await splitIntoParagraphChunks(text, { maxChunkSize, minChunkSize });
     return Response.json({ chunks });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "切分失败";

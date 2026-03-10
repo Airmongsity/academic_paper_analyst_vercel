@@ -16,10 +16,32 @@ function send(controller: ReadableStreamDefaultController<Uint8Array>, obj: obje
   controller.enqueue(new TextEncoder().encode(JSON.stringify(obj) + "\n"));
 }
 
+const PDF_FETCH_RETRIES = 3;
+
+async function fetchPdfWithRetry(paper: PaperInput): Promise<Buffer | null> {
+  if (paper.source === "ncpssd" && paper.link) {
+    return fetchPdfBlob(paper.link, PDF_FETCH_RETRIES - 1);
+  }
+  if (!paper.pdfUrl?.trim()) return null;
+  for (let attempt = 0; attempt < PDF_FETCH_RETRIES; attempt++) {
+    try {
+      const res = await fetch(paper.pdfUrl);
+      if (res.ok) return Buffer.from(await res.arrayBuffer());
+    } catch {
+      if (attempt === PDF_FETCH_RETRIES - 1) return null;
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const papers = (body.papers ?? []) as PaperInput[];
   const uploadedPdfs = (body.uploadedPdfs ?? []) as { name: string; base64: string }[];
+  const maxChunkSize = typeof body?.maxChunkSize === "number" ? body.maxChunkSize : undefined;
+  const minChunkSize = typeof body?.minChunkSize === "number" ? body.minChunkSize : undefined;
+  const splitOpts = { maxChunkSize, minChunkSize };
 
   if (papers.length === 0 && uploadedPdfs.length === 0) {
     return new Response(JSON.stringify({ error: "未选择论文或上传 PDF" }), { status: 400 });
@@ -38,11 +60,11 @@ export async function POST(req: NextRequest) {
           send(controller, { type: "progress", step: "download", index: idx, total, msg: `正在下载第 ${idx} 篇 PDF：${(paper.title ?? "").slice(0, 20)}…` });
 
           let pdfBuffer: Buffer | null = null;
-          if (paper.source === "ncpssd" && paper.link) {
-            pdfBuffer = await fetchPdfBlob(paper.link);
-          } else if (paper.pdfUrl?.trim()) {
-            const res = await fetch(paper.pdfUrl);
-            if (res.ok) pdfBuffer = Buffer.from(await res.arrayBuffer());
+          try {
+            pdfBuffer = await fetchPdfWithRetry(paper);
+          } catch {
+            failed++;
+            continue;
           }
 
           if (!pdfBuffer?.length) {
@@ -50,15 +72,19 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          send(controller, { type: "progress", step: "parse", index: idx, msg: "正在解析 PDF" });
-          const rawText = await extractTextFromPdf(pdfBuffer);
+          try {
+            send(controller, { type: "progress", step: "parse", index: idx, msg: "正在解析 PDF" });
+            const rawText = await extractTextFromPdf(pdfBuffer);
 
-          send(controller, { type: "progress", step: "split", index: idx, msg: "正在切分语料" });
-          const cleaned = cleanPdfText(rawText);
-          const rawChunks = await splitIntoChunks(cleaned);
-          const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
+            send(controller, { type: "progress", step: "split", index: idx, msg: "正在切分语料" });
+            const cleaned = cleanPdfText(rawText);
+            const rawChunks = await splitIntoChunks(cleaned, splitOpts);
+            const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
 
-          allChunks.push({ title: paper.title ?? "未知", chunks });
+            allChunks.push({ title: paper.title ?? "未知", chunks });
+          } catch {
+            failed++;
+          }
         }
 
         for (const up of uploadedPdfs) {
@@ -78,20 +104,27 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          send(controller, { type: "progress", step: "split", index: idx, msg: "正在切分语料" });
-          const rawText = await extractTextFromPdf(pdfBuffer);
-          const cleaned = cleanPdfText(rawText);
-          const rawChunks = await splitIntoChunks(cleaned);
-          const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
+          try {
+            send(controller, { type: "progress", step: "split", index: idx, msg: "正在切分语料" });
+            const rawText = await extractTextFromPdf(pdfBuffer);
+            const cleaned = cleanPdfText(rawText);
+            const rawChunks = await splitIntoChunks(cleaned, splitOpts);
+            const chunks = rawChunks.map((c) => normalizeWhitespace(c)).filter(Boolean);
 
-          allChunks.push({ title: up.name.replace(/\.pdf$/i, ""), chunks });
+            allChunks.push({ title: up.name.replace(/\.pdf$/i, ""), chunks });
+          } catch {
+            failed++;
+          }
         }
 
+        const successCount = allChunks.length;
         send(controller, {
           type: "result",
           papers: allChunks,
           totalChunks: allChunks.reduce((s, p) => s + p.chunks.length, 0),
           failed,
+          successCount,
+          totalCount: total,
         });
       } catch (e) {
         send(controller, { type: "error", error: e instanceof Error ? e.message : "分析失败" });
