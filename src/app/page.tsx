@@ -97,11 +97,14 @@ export default function Home() {
 
   const hasCorpus = selectedLinks.size > 0 || uploadedPdfs.length > 0;
   const textToOptimize = confirmedText || parsedText;
+  const [analyzingAi, setAnalyzingAi] = useState(false);
+  const [chunkAiResults, setChunkAiResults] = useState<Map<string, { valid: boolean; reason?: string }>>(new Map());
 
   useEffect(() => {
     if (!analyzeResult) return;
     setAnalyzeResult(null);
     setSelectedChunks(new Set());
+    setChunkAiResults(new Map());
     setCompletedSteps((p) => {
       const n = new Set(p);
       n.delete("parse");
@@ -234,6 +237,7 @@ export default function Home() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
+      let lastResult: { papers: { title?: string; chunks: string[] }[] } | null = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -245,8 +249,9 @@ export default function Home() {
           try {
             const data = JSON.parse(line);
             if (data.type === "progress") setAnalyzeProgress(data.msg);
-            else             if (data.type === "result") {
+            else if (data.type === "result") {
               const list = data.papers ?? [];
+              lastResult = { papers: list };
               setAnalyzeResult({
                 totalChunks: data.totalChunks,
                 papers: list,
@@ -255,17 +260,52 @@ export default function Home() {
                 successCount: data.successCount,
                 totalCount: data.totalCount,
               });
-              const initial = new Set<string>();
-              list.forEach((p: { chunks: string[] }, i: number) => {
-                p.chunks.forEach((chunk: string, j: number) => {
-                  if (isChunkLinguistic(chunk)) initial.add(`${i}-${j}`);
-                });
-              });
-              setSelectedChunks(initial);
               setAnalyzeProgress(null);
             } else if (data.type === "error") throw new Error(data.error);
           } catch (err) {
             if (!(err instanceof SyntaxError)) throw err;
+          }
+        }
+      }
+      if (lastResult && lastResult.papers.length > 0) {
+        const items: { paperIndex: number; chunkIndex: number; content: string; title?: string }[] = [];
+        lastResult.papers.forEach((p, i) => {
+          p.chunks.forEach((content: string, j: number) => {
+            items.push({ paperIndex: i, chunkIndex: j, content, title: p.title });
+          });
+        });
+        if (items.length > 0) {
+          setAnalyzingAi(true);
+          const BATCH = 20;
+          const allResults = new Map<string, { valid: boolean; reason?: string }>();
+          const initial = new Set<string>();
+          try {
+            for (let i = 0; i < items.length; i += BATCH) {
+              const batch = items.slice(i, i + BATCH);
+              const aiRes = await fetch("/api/analyze-corpus-ai", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ items: batch }),
+              });
+              const aiData = await aiRes.json();
+              const aiList = (aiData.results ?? []) as { paperIndex: number; chunkIndex: number; valid: boolean; reason?: string }[];
+              aiList.forEach((r) => {
+                const k = `${r.paperIndex}-${r.chunkIndex}`;
+                allResults.set(k, { valid: r.valid, reason: r.reason });
+                if (r.valid) initial.add(k);
+              });
+              setChunkAiResults(new Map(allResults));
+              setSelectedChunks(new Set(initial));
+            }
+          } catch {
+            lastResult.papers.forEach((p, i) => {
+              p.chunks.forEach((chunk: string, j: number) => {
+                if (isChunkLinguistic(chunk)) initial.add(`${i}-${j}`);
+              });
+            });
+            setSelectedChunks(initial);
+          } finally {
+            setAnalyzingAi(false);
           }
         }
       }
@@ -276,6 +316,13 @@ export default function Home() {
       setAnalyzeProgress(null);
     }
   };
+
+  useEffect(() => {
+    if (activeStep === "parse" && hasCorpus && !analyzing && !analyzeResult) {
+      handleAnalyze();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStep, hasCorpus, analyzing, analyzeResult]);
 
   const toggleSelect = (link: string) => {
     setSelectedLinks((prev) => {
@@ -659,18 +706,33 @@ export default function Home() {
               </div>
             )}
             <div className="border-t pt-4 mt-4">
-              <label className="block text-sm font-medium mb-2">或上传 PDF 加入语料库</label>
-              <input
-                type="file"
-                accept="application/pdf"
-                multiple
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  setUploadedPdfs((prev) => [...prev, ...files.map((f) => ({ name: f.name, file: f }))]);
-                  e.target.value = "";
+              <label className="block text-sm font-medium mb-2">或上传 PDF 加入语料库（支持拖拽）</label>
+              <div
+                onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-indigo-400", "bg-indigo-50/50"); }}
+                onDragLeave={(e) => { e.currentTarget.classList.remove("border-indigo-400", "bg-indigo-50/50"); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.remove("border-indigo-400", "bg-indigo-50/50");
+                  const files = Array.from(e.dataTransfer.files ?? []).filter((f) => f.type === "application/pdf");
+                  if (files.length) setUploadedPdfs((prev) => [...prev, ...files.map((f) => ({ name: f.name, file: f }))]);
                 }}
-                className="text-sm"
-              />
+                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center text-sm text-gray-500 hover:border-gray-400 transition-colors cursor-pointer"
+                onClick={() => document.getElementById("pdf-upload-input")?.click()}
+              >
+                <input
+                  id="pdf-upload-input"
+                  type="file"
+                  accept="application/pdf"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    setUploadedPdfs((prev) => [...prev, ...files.map((f) => ({ name: f.name, file: f }))]);
+                    e.target.value = "";
+                  }}
+                />
+                拖动 PDF 到此处，或点击选择文件
+              </div>
               {uploadedPdfs.length > 0 && (
                 <ul className="text-xs text-gray-500 mt-1 space-y-1">
                   {uploadedPdfs.map((u, i) => (
@@ -715,15 +777,31 @@ export default function Home() {
                 />
               </label>
             </div>
-            <button
-              type="button"
-              onClick={handleAnalyze}
-              disabled={!hasCorpus || analyzing}
-              className="px-6 py-2.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50"
-            >
-              {analyzing ? "解析中…" : "解析语料库"}
-            </button>
-            {analyzeProgress && <p className="text-sm text-indigo-600 animate-pulse">{analyzeProgress}</p>}
+            {!analyzeResult && (
+              <button
+                type="button"
+                onClick={handleAnalyze}
+                disabled={!hasCorpus || analyzing}
+                className="px-6 py-2.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50"
+              >
+                {analyzing ? "解析中…" : "手动解析"}
+              </button>
+            )}
+            {analyzeResult && (
+              <button
+                type="button"
+                onClick={() => { setAnalyzeResult(null); setChunkAiResults(new Map()); handleAnalyze(); }}
+                disabled={analyzing}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm"
+              >
+                重新解析
+              </button>
+            )}
+            {(analyzeProgress || analyzingAi) && (
+              <p className="text-sm text-indigo-600 animate-pulse">
+                {analyzingAi ? "AI 语料分析中…" : analyzeProgress}
+              </p>
+            )}
             {analyzeResult && (
               <div className="space-y-3">
                 <p className="text-sm">
@@ -736,8 +814,8 @@ export default function Home() {
                     </span>
                   )}
                 </p>
-                <p className="text-xs text-indigo-600">已选 {selectedChunks.size} 个语料块</p>
-                <div className="flex flex-wrap gap-2">
+                <p className="text-xs text-indigo-600">已选 {selectedChunks.size} 个语料块（AI 推荐已预选）</p>
+                <div className="flex flex-wrap gap-2 items-center">
                   <button type="button" onClick={selectAllChunks} className="text-xs px-2 py-1 border rounded hover:bg-gray-100">全选</button>
                   <button type="button" onClick={deselectAllChunks} className="text-xs px-2 py-1 border rounded hover:bg-gray-100">全部不选</button>
                   <button
@@ -750,37 +828,51 @@ export default function Home() {
                   </button>
                   {vectorizeMsg && <span className="text-xs text-emerald-600">{vectorizeMsg}</span>}
                 </div>
-                <div className="space-y-2 min-h-[300px] max-h-[65vh] overflow-y-auto overscroll-contain">
-                  {analyzeResult.papers.map((p, i) => (
-                    <details key={i} className="border rounded p-2 bg-white" open>
-                      <summary className="cursor-pointer font-medium text-base">{p.title}</summary>
-                      <ol className="mt-2 space-y-2 list-decimal list-inside text-sm leading-relaxed">
-                        {p.chunks.map((chunk, j) => {
-                          const key = chunkKey(i, j);
-                          const checked = selectedChunks.has(key);
-                          const isLinguistic = isChunkLinguistic(chunk);
-                          return (
-                            <li
-                              key={j}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => toggleChunk(i, j)}
-                              onKeyDown={(e) => e.key === "Enter" && toggleChunk(i, j)}
-                              className={`pl-1 border-l-2 flex items-start gap-2 cursor-pointer hover:bg-gray-50 rounded pr-1 ${
-                                checked ? "border-indigo-500 bg-indigo-50/50" : "border-gray-200"
-                              }`}
-                            >
-                              <span className="shrink-0 w-5 h-5 rounded border flex items-center justify-center text-xs">
-                                {checked && "✓"}
-                              </span>
-                              {!isLinguistic && <span className="text-amber-600 text-[10px]">非语言&gt;1/3</span>}
-                              <span className="flex-1 min-w-0">{chunk}</span>
-                            </li>
-                          );
-                        })}
-                      </ol>
-                    </details>
-                  ))}
+                <div className="min-h-[75vh] max-h-[85vh] overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-3">
+                    {analyzeResult.papers.flatMap((p, i) =>
+                      p.chunks.map((chunk, j) => {
+                        const key = chunkKey(i, j);
+                        const checked = selectedChunks.has(key);
+                        const ai = chunkAiResults.get(key);
+                        const hasAi = ai !== undefined;
+                        const isValid = ai?.valid ?? true;
+                        const reason = ai?.reason;
+                        return (
+                          <div
+                            key={key}
+                            className={`border rounded-lg p-3 flex flex-col min-h-[140px] bg-white hover:bg-gray-50/80 cursor-pointer ${
+                              checked ? "ring-2 ring-indigo-400 bg-indigo-50/30" : ""
+                            }`}
+                            onClick={() => toggleChunk(i, j)}
+                          >
+                            <p className="text-sm leading-relaxed text-gray-800 flex-1 whitespace-pre-wrap">
+                              {chunk}
+                            </p>
+                            {p.title && <span className="text-xs text-gray-400 mt-1 shrink-0">{p.title}</span>}
+                            <div className="mt-2 flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <label className="flex items-center gap-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleChunk(i, j)}
+                                  className="shrink-0"
+                                />
+                                <span className="text-xs text-gray-500">保存</span>
+                              </label>
+                              {hasAi ? (
+                                <span className={`text-xs ${isValid ? "text-emerald-600" : "text-amber-600"}`}>
+                                  {isValid ? "✓ 有效" : `✗ ${reason ?? "无效"}`}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-300">分析中…</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
             )}
